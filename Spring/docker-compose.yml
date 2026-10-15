@@ -1,0 +1,58 @@
+services:
+  # REDIS Database - Fast, temporary in-memory cache, used for the caching
+  redis:
+    image: redis
+    ports:
+      - "6379:6379"
+
+  # POSTGRES - Permanent relational database, stores real data that must never be lost
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      # These env vars are read by the official postgres image on FIRST container startup to auto-create the database
+      - POSTGRES_DB=demo
+      - POSTGRES_USER=demo
+      - POSTGRES_PASSWORD=demo
+    # Without the 'volume' the database data would live only inside the container and get wiped every time the container is removed
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # KEYCLOAK - Handles user accounts, login, and issues tokens. Spring won't manage passwords itself
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    # Runs Keycloak in development mode — skips production setup (like HTTPS certs), fine for learning
+    command: start-dev
+    # Mapped to 8081 on the PC since 8080 is already used by the spring service
+    ports:
+      - "8081:8080"
+    environment:
+      # Creates one admin login for Keycloak's own management dashboard
+      # (separate from your app's actual users)
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+
+  # SPRING Backend - Your own Spring Boot app, built from the Dockerfile in this same folder
+  spring:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      # Make sure both dependencies start before this service does
+      - redis
+      - postgres
+      - keycloak
+    environment:
+      # Settings handed to the Spring container when it starts. Overrides the matching values in application.properties.
+      - SPRING_DATA_REDIS_HOST=redis
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/demo
+      - SPRING_DATASOURCE_USERNAME=demo
+      - SPRING_DATASOURCE_PASSWORD=demo
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI=http://localhost:8081/realms/demo-app
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://keycloak:8080/realms/demo-app/protocol/openid-connect/certs
+
+
+# Declares postgres_data as a named volume Docker manages on your machine, separate from any container's lifecycle
+volumes:
+  postgres_data:
